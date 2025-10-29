@@ -1,92 +1,41 @@
 import { Request, Response, NextFunction } from "express";
 import { ParkingRepository } from "../repositories/ParkingRepository";
-import { redisClient } from "../utils/redisClient";
-import { calculateFee } from "../utils/feeCalculator";
+import { ParkingSpot } from "../models/ParkingSpot.model";
 import { APIResp } from "../utils/apiResponse";
+import { calculateFee } from "../utils/feeCalculator";
+
+const repo = new ParkingRepository();
 
 export class ParkingController {
-  #repo: ParkingRepository;
-
-  constructor() {
-    this.#repo = new ParkingRepository();
-  }
-
-  #getCandidateSizes(vehicleType: string) {
-    const order = ["motorcycle", "car", "bus"];
-    const idx = order.indexOf(vehicleType);
-    return idx >= 0 ? order.slice(idx) : [vehicleType];
-  }
-
-
-  async #getPreferredSpotIdFromCache(vehicleType: string): Promise<string | null> {
-    const best = await redisClient.getBestSpotId(vehicleType);
-    if (best) return best;
-
-    if (vehicleType === "motorcycle") {
-      return (await redisClient.getBestSpotId("car")) || (await redisClient.getBestSpotId("bus"));
-    }
-    if (vehicleType === "car") return (await redisClient.getBestSpotId("bus")) || null;
-
-    return null;
-  }
-
-  async #removeSpotFromCache(spot: any) {
-    if (!spot) return;
-    try {
-      await redisClient.removeAvailableSpot(spot.type, spot._id.toString());
-    } catch (err) {
-      console.warn("Redis removeAvailableSpot failed:", err);
-    }
-  }
-
+  // ====== VEHICLE ENTRY ======
   checkIn = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { number, type, owner } = req.body;
-      const preferredSpotId = await this.#getPreferredSpotIdFromCache(type);
-      const candidates = this.#getCandidateSizes(type);
-
-      const result = await this.#repo.transactionalCheckIn(candidates, preferredSpotId, { number, type, owner });
+      const candidates = this.getCandidateSizes(type);
+      const result = await repo.transactionalCheckIn(candidates, null, { number, type, owner });
 
       if (!result.success) {
-        if (preferredSpotId) {
-          const retry = await this.#repo.transactionalCheckIn(candidates, null, { number, type, owner });
-          if (!retry.success) throw new Error(retry.reason || "No spot available");
-
-          await this.#removeSpotFromCache(retry.spot);
-          return APIResp.successCreate({ transaction: retry.transaction, spot: retry.spot }, res);
-        }
-        throw new Error(result.reason || "No spot available");
+        return APIResp.getErrorResult(result.reason || "No available spot", res);
       }
 
-      await this.#removeSpotFromCache(result.spot);
       APIResp.successCreate({ transaction: result.transaction, spot: result.spot }, res);
     } catch (err) {
       next(err);
     }
   };
 
-  checkOutByVehicleNumber = async (req: Request, res: Response, next: NextFunction) => {
+  // ====== VEHICLE EXIT ======
+  checkOut = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { number } = req.params;
-      const active = await this.#repo.getActiveTransactionByVehicleNumber(number);
+      const active = await repo.getActiveTransactionByVehicleNumber(number);
 
-      if (!active) throw new Error("No active transaction for vehicle");
+      if (!active) return APIResp.getErrorResult("No active transaction found", res);
 
       const fee = calculateFee(active.vehicleType as any, active.checkIn, new Date());
-      const resTxn = await this.#repo.transactionalCheckOut(active._id.toString(), fee);
+      const resTxn = await repo.transactionalCheckOut(active._id.toString(), fee);
 
-      if (!resTxn.success) throw new Error(resTxn.reason || "Checkout failed");
-
-      const txnDoc = await this.#repo.getTransactionById(active._id.toString());
-      const spotDoc: any = txnDoc ? (txnDoc as any).parkingSpot : null;
-
-      if (spotDoc) {
-        try {
-          await redisClient.addAvailableSpot(spotDoc.type, spotDoc._id.toString(), spotDoc.floor, spotDoc.spotNumber);
-        } catch (err) {
-          console.warn("Redis addAvailableSpot failed:", err);
-        }
-      }
+      if (!resTxn.success) return APIResp.getErrorResult(resTxn.reason || "Checkout failed", res);
 
       APIResp.Ok({ transaction: resTxn.transaction, fee }, res);
     } catch (err) {
@@ -94,19 +43,29 @@ export class ParkingController {
     }
   };
 
-
-  getAvailability = async (_: Request, res: Response, next: NextFunction) => {
+  // ====== GET AVAILABILITY ======
+  getAvailability = async (_req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = await this.#repo.getAvailableSpotsGrouped();
+      const data = await repo.getAvailableSpotsGrouped();
       APIResp.Ok(data, res);
     } catch (err) {
       next(err);
     }
   };
 
-  getAllTransactions = async (_: Request, res: Response, next: NextFunction) => {
+  // ====== GET TRANSACTIONS ======
+  getAllTransactions = async (_req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = await this.#repo.getAllTransactions();
+      const data = await repo.getAllTransactions();
+      APIResp.Ok(data, res);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  getActiveTransactions = async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await repo.getActiveTransactions();
       APIResp.Ok(data, res);
     } catch (err) {
       next(err);
@@ -115,29 +74,68 @@ export class ParkingController {
 
   getTransactionById = async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const data = await repo.getTransactionById(req.params.id);
+      if (!data) return APIResp.getErrorResult("Transaction not found", res);
+      APIResp.Ok(data, res);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  getRevenueByDate = async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await repo.getRevenueByDate();
+      APIResp.Ok(data, res);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  // ====== PARKING SPOTS MANAGEMENT ======
+  createParkingSpot = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { code, floor, zone, type, spotNumber } = req.body;
+
+      if (!code || !floor || !type || !spotNumber) {
+        return APIResp.getErrorResult("code, floor, type and spotNumber are required", res);
+      }
+
+      const existing = await ParkingSpot.findOne({ code });
+      if (existing) return APIResp.getErrorResult("Spot with this code already exists", res);
+
+      const spot = await ParkingSpot.create({
+        code,
+        floor,
+        zone,
+        type,
+        spotNumber,
+        isAvailable: true,
+      });
+
+      APIResp.successCreate(spot, res);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  updateParkingSpot = async (req: Request, res: Response, next: NextFunction) => {
+    try {
       const { id } = req.params;
-      const data = await this.#repo.getTransactionById(id);
-      APIResp.Ok(data, res);
+      const update = req.body;
+
+      const spot = await ParkingSpot.findByIdAndUpdate(id, update, { new: true });
+      if (!spot) return APIResp.getErrorResult("Parking spot not found", res);
+
+      APIResp.Ok(spot, res);
     } catch (err) {
       next(err);
     }
   };
 
-  getActiveTransactions = async (_: Request, res: Response, next: NextFunction) => {
-    try {
-      const data = await this.#repo.getActiveTransactions();
-      APIResp.Ok(data, res);
-    } catch (err) {
-      next(err);
-    }
-  };
-
-  getRevenueByDate = async (_: Request, res: Response, next: NextFunction) => {
-    try {
-      const data = await this.#repo.getRevenueByDate();
-      APIResp.Ok(data, res);
-    } catch (err) {
-      next(err);
-    }
-  };
+  // ====== HELPER ======
+  private getCandidateSizes(vehicleType: string) {
+    const order = ["motorcycle", "car", "bus"];
+    const idx = order.indexOf(vehicleType);
+    return idx >= 0 ? order.slice(idx) : [vehicleType];
+  }
 }

@@ -1,12 +1,11 @@
 import mongoose from "mongoose";
-import { ParkingSpot } from "../models/ParkingSpot.model";
+import { ParkingSpot, IParkingSpot } from "../models/ParkingSpot.model";
 import { Vehicle } from "../models/Vehicle.model";
 import { Transaction } from "../models/Transaction.model";
 
-/**
- * ParkingRepository - DB operations with transactions
- */
 export class ParkingRepository {
+  /* --------------------------- Parking Spots --------------------------- */
+
   async findAvailableSpotBySize(size: string) {
     return ParkingSpot.findOne({ type: size, isAvailable: true }).sort({ floor: 1, spotNumber: 1 });
   }
@@ -26,7 +25,12 @@ export class ParkingRepository {
   async getAvailableSpotsGrouped() {
     return ParkingSpot.aggregate([
       { $match: { isAvailable: true } },
-      { $group: { _id: "$floor", spots: { $push: { spotNumber: "$spotNumber", id: "$_id", type: "$type", code: "$code" } } } },
+      {
+        $group: {
+          _id: "$floor",
+          spots: { $push: { spotNumber: "$spotNumber", id: "$_id", type: "$type", code: "$code" } }
+        }
+      },
       { $sort: { _id: 1 } }
     ]);
   }
@@ -45,7 +49,30 @@ export class ParkingRepository {
     ]);
   }
 
-  // transactional check-in
+  /* --------------------------- Parking Spots insert and update --------------------------- */
+
+  async createSpot(data: Partial<IParkingSpot>) {
+    return await ParkingSpot.create(data);
+  }
+
+  async createManySpots(data: Partial<IParkingSpot>[]) {
+    return await ParkingSpot.insertMany(data);
+  }
+
+  async updateSpot(id: string, data: Partial<IParkingSpot>) {
+    return await ParkingSpot.findByIdAndUpdate(id, data, { new: true });
+  }
+
+  async getAllSpots() {
+    return await ParkingSpot.find().sort({ floor: 1, spotNumber: 1 });
+  }
+
+  async getSpotById(id: string) {
+    return await ParkingSpot.findById(id);
+  }
+
+  /* --------------------- Transactional Check-in/Out --------------------- */
+
   async transactionalCheckIn(
     sizeCandidates: string[],
     preferredSpotId: string | null,
@@ -56,7 +83,13 @@ export class ParkingRepository {
     try {
       const vehicle = await Vehicle.findOneAndUpdate(
         { number: vehiclePayload.number },
-        { $set: { number: vehiclePayload.number, type: vehiclePayload.type, owner: vehiclePayload.owner } },
+        {
+          $set: {
+            number: vehiclePayload.number,
+            type: vehiclePayload.type,
+            owner: vehiclePayload.owner
+          }
+        },
         { upsert: true, new: true, session }
       );
 
@@ -72,7 +105,9 @@ export class ParkingRepository {
 
       if (!spot) {
         for (const size of sizeCandidates) {
-          spot = await ParkingSpot.findOne({ type: size, isAvailable: true }).sort({ floor: 1, spotNumber: 1 }).session(session);
+          spot = await ParkingSpot.findOne({ type: size, isAvailable: true })
+            .sort({ floor: 1, spotNumber: 1 })
+            .session(session);
           if (spot) {
             spot.isAvailable = false;
             await spot.save({ session });
@@ -112,7 +147,6 @@ export class ParkingRepository {
     }
   }
 
-  // transactional check-out
   async transactionalCheckOut(transactionId: string, fee: number) {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -146,10 +180,11 @@ export class ParkingRepository {
     }
   }
 
-  // helper: get active txn by vehicle number
   async getActiveTransactionByVehicleNumber(number: string) {
     const vehicle = await Vehicle.findOne({ number });
     if (!vehicle) return null;
-    return Transaction.findOne({ vehicle: vehicle._id, status: "ONGOING" }).populate("parkingSpot").populate("vehicle");
+    return Transaction.findOne({ vehicle: vehicle._id, status: "ONGOING" })
+      .populate("parkingSpot")
+      .populate("vehicle");
   }
 }
