@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from "express";
 import { ParkingRepository } from "../repositories/ParkingRepository";
-import { ParkingSpot } from "../models/ParkingSpot.model";
 import { APIResp } from "../utils/apiResponse";
 import { calculateFee } from "../utils/feeCalculator";
 
@@ -86,47 +85,6 @@ export class ParkingController {
     try {
       const data = await repo.getRevenueByDate();
       APIResp.Ok(data, res);
-    } catch (err) {
-      next(err);
-    }
-  };
-
-  // ====== PARKING SPOTS MANAGEMENT ======
-  createParkingSpot = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { code, floor, zone, type, spotNumber } = req.body;
-
-      if (!code || !floor || !type || !spotNumber) {
-        return APIResp.getErrorResult("code, floor, type and spotNumber are required", res);
-      }
-
-      const existing = await ParkingSpot.findOne({ code });
-      if (existing) return APIResp.getErrorResult("Spot with this code already exists", res);
-
-      const spot = await ParkingSpot.create({
-        code,
-        floor,
-        zone,
-        type,
-        spotNumber,
-        isAvailable: true,
-      });
-
-      APIResp.successCreate(spot, res);
-    } catch (err) {
-      next(err);
-    }
-  };
-
-  updateParkingSpot = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { id } = req.params;
-      const update = req.body;
-
-      const spot = await ParkingSpot.findByIdAndUpdate(id, update, { new: true });
-      if (!spot) return APIResp.getErrorResult("Parking spot not found", res);
-
-      APIResp.Ok(spot, res);
     } catch (err) {
       next(err);
     }

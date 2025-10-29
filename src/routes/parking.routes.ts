@@ -13,9 +13,9 @@ router.post("/checkin", controller.checkIn);
 router.post("/checkout/:number", controller.checkOut);
 
 
-// Parking spot management
-router.post("/spot", createParkingSpotValidation, controller.createParkingSpot);
-router.put("/spot/:id", updateParkingSpotValidation, controller.updateParkingSpot);
+// // Parking spot management
+// router.post("/spot", createParkingSpotValidation, controller.createParkingSpot);
+// router.put("/spot/:id", updateParkingSpotValidation, controller.updateParkingSpot);
 
 // Transaction and reports
 router.get("/availability", controller.getAvailability);
