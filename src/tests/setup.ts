@@ -1,17 +1,24 @@
 import mongoose from "mongoose";
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 
-let mongo: MongoMemoryServer;
+let mongo: MongoMemoryReplSet;
 
 beforeAll(async () => {
-  mongo = await MongoMemoryServer.create();
+  mongo = await MongoMemoryReplSet.create({
+    replSet: { count: 1 },
+  });
+
   const uri = mongo.getUri();
-  await mongoose.connect(uri);
+  await mongoose.connect(uri, {
+    maxPoolSize: 10,
+    retryWrites: true,
+    w: "majority",
+  });
 });
 
 afterEach(async () => {
   const collections = await mongoose.connection.db.collections();
-  for (let collection of collections) {
+  for (const collection of collections) {
     await collection.deleteMany({});
   }
 });

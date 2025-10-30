@@ -14,7 +14,7 @@ describe("AuthController", () => {
       });
 
     expect(res.statusCode).toBe(201);
-    expect(res.body.data.email).toBe("test@example.com");
+    expect(res.body.result.email).toBe("test@example.com");
 
     const user = await User.findOne({ email: "test@example.com" });
     expect(user).toBeTruthy();
@@ -61,7 +61,7 @@ describe("AuthController", () => {
       });
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.data.token).toBeDefined();
+    expect(res.body.result.token).toBeDefined();
   });
 
   it("should reject invalid credentials", async () => {

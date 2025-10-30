@@ -5,7 +5,7 @@ import { ParkingSpot } from "../models/ParkingSpot.model";
 describe("AdminController", () => {
   it("should create a new parking spot", async () => {
     const res = await request(app)
-      .post("/api/admin/spots")
+      .post("/api/admin/spot")
       .send({
         code: "Z1",
         floor: 1,
@@ -15,13 +15,13 @@ describe("AdminController", () => {
       });
 
     expect(res.statusCode).toBe(201);
-    expect(res.body.data.code).toBe("Z1");
+    expect(res.body.result.code).toBe("Z1");
   });
 
   it("should list all parking spots", async () => {
     await ParkingSpot.create({ code: "Y1", floor: 2, type: "bus", spotNumber: 11 });
     const res = await request(app).get("/api/admin/spots");
     expect(res.statusCode).toBe(200);
-    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.result.length).toBeGreaterThan(0);
   });
 });
